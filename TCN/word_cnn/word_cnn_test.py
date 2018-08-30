@@ -12,12 +12,13 @@ from TCN.word_cnn.model import *
 import pickle
 from random import randint
 
+from tensorboardX import SummaryWriter
 
 parser = argparse.ArgumentParser(description='Sequence Modeling - Word-level Language Modeling')
 
 parser.add_argument('--batch_size', type=int, default=16, metavar='N',
                     help='batch size (default: 16)')
-parser.add_argument('--cuda', action='store_false',
+parser.add_argument('--cuda', action='store_false', default=False,
                     help='use CUDA (default: True)')
 parser.add_argument('--dropout', type=float, default=0.45,
                     help='dropout applied to layers (default: 0.45)')
@@ -108,12 +109,14 @@ def evaluate(data_source):
         # Note that we don't add TAR loss here
         total_loss += (data.size(1) - eff_history) * loss.data
         processed_data_size += data.size(1) - eff_history
-    return total_loss[0] / processed_data_size
+    return total_loss.item() / processed_data_size
 
 
 def train():
     # Turn on training mode which enables dropout.
+    global writer
     global train_data
+    global write_graph
     model.train()
     total_loss = 0
     start_time = time.time()
@@ -122,6 +125,10 @@ def train():
             continue
         data, targets = get_batch(train_data, i, args)
         optimizer.zero_grad()
+        if write_graph:
+            writer.add_graph(model, data)
+            write_graph = False
+            
         output = model(data)
 
         # Discard the effective history part
@@ -140,18 +147,26 @@ def train():
         total_loss += loss.data
 
         if batch_idx % args.log_interval == 0 and batch_idx > 0:
-            cur_loss = total_loss[0] / args.log_interval
+            cur_loss = total_loss.item() / args.log_interval
             elapsed = time.time() - start_time
             print('| epoch {:3d} | {:5d}/{:5d} batches | lr {:02.5f} | ms/batch {:5.5f} | '
                   'loss {:5.2f} | ppl {:8.2f}'.format(
                 epoch, batch_idx, train_data.size(1) // args.validseqlen, lr,
                 elapsed * 1000 / args.log_interval, cur_loss, math.exp(cur_loss)))
+            writer.add_scalar('loss', cur_loss, batch_idx + 1)
+            writer.add_scalar('perplexity', math.exp(cur_loss), batch_idx + 1)
+            writer.add_scalar('learning rate', lr)
             total_loss = 0
             start_time = time.time()
 
 
 if __name__ == "__main__":
     best_vloss = 1e8
+
+    # for Tensorbard logging
+    write_graph = True # flag flipped once first batch processed
+    writer = SummaryWriter('./logs')
+    
 
     # At any point you can hit Ctrl + C to break out of training early.
     try:
@@ -161,6 +176,11 @@ if __name__ == "__main__":
             train()
             val_loss = evaluate(val_data)
             test_loss = evaluate(test_data)
+
+            writer.add_scalar('valid loss', val_loss)
+            writer.add_scalar('valid perplexity', math.exp(val_loss))
+            writer.add_scalar('test loss', test_loss)
+            writer.add_scalar('test perplexity', math.exp(test_loss))
 
             print('-' * 89)
             print('| end of epoch {:3d} | time: {:5.2f}s | valid loss {:5.2f} | '
