@@ -9,25 +9,23 @@ import pickle
 
 from torch.autograd import Variable
 from utils import *
-from model import 
+from model import DCNN
 
-from TCN.word_cnn.model import *
-import pickle
 from random import randint
 
 from tensorboardX import SummaryWriter
 
-parser = argparse.ArgumentParser(description='Sequence Modeling - Word-level Language Modeling')
+parser = argparse.ArgumentParser(description='Sequence Modeling - Twitter sentiment prediction repro')
 
-parser.add_argument('--batch_size', type=int, default=16, metavar='N',
-                    help='batch size (default: 16)')
+parser.add_argument('--batch_size', type=int, default=32, metavar='N',
+                    help='batch size (default: 32)')
 parser.add_argument('--cuda', action='store_false', default=False,
                     help='use CUDA (default: True)')
-parser.add_argument('--dropout', type=float, default=0.45,
-                    help='dropout applied to layers (default: 0.45)')
-parser.add_argument('--emb_dropout', type=float, default=0.25,
-                    help='dropout applied to the embedded layer (default: 0.25)')
-parser.add_argument('--clip', type=float, default=0.35,
+parser.add_argument('--dropout', type=float, default=0.0,
+                    help='dropout applied to layers (default: 0)')
+parser.add_argument('--emb_dropout', type=float, default=0.0,
+                    help='dropout applied to the embedded layer (default: 0.0)')
+parser.add_argument('--clip', type=float, default=-1.0,
                     help='gradient clip, -1 means no clip (default: 0.35)')
 parser.add_argument('--epochs', type=int, default=100,
                     help='upper epoch limit (default: 100)')
