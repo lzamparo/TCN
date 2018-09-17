@@ -1,22 +1,19 @@
 import os
-import torch
-from torch.autograd import Variable
+import re
+import csv
+import string
 import pickle
+import torch
 
-"""
-Note: The meaning of batch_size in PTB is different from that in MNIST example. In MNIST, 
-batch_size is the # of sample data that is considered in each iteration; in PTB, however,
-it is the number of segments to speed up computation. 
-
-The goal of PTB is to train a language model to predict the next word.
-"""
+from torch.autograd import Variable
+from bs4 import BeautifulSoup
 
 
 def data_generator(args):
     if os.path.exists(args.data + "/corpus") and not args.corpus:
         corpus = pickle.load(open(args.data + '/corpus', 'rb'))
     else:
-        corpus = Corpus(args.data)
+        corpus = TwitterCorpus(args)
         pickle.dump(corpus, open(args.data + '/corpus', 'wb'))
     return corpus
 
@@ -62,6 +59,7 @@ class Corpus(object):
             for line in f:
                 words = line.split() + ['<eos>']
                 for word in words:
+                    
                     ids[token] = self.dictionary.word2idx[word]
                     token += 1
 
@@ -69,7 +67,7 @@ class Corpus(object):
 
 
 class TwitterCorpus(object):
-    def __init__(self, train_path, test_path):
+    def __init__(self, args):
         self.dictionary = Dictionary()
         
         self.username_re = re.compile("\@[\w]+")
@@ -77,8 +75,8 @@ class TwitterCorpus(object):
         self.emoticon_re = re.compile("(;D)|(:D)|(:/)|(=\))|(:-D)|(;-D)|(:\()|(=\()|(:\s{1}\()")
         self.run_on_re = re.compile(r"(\w)\1{2,}", re.DOTALL)        
         
-        self.train_tokens, self.train_ids = self.prepare_dataset(train_path)
-        self.test_tokens, self.test_ids = self.prepare_dataset(test_path)
+        self.train_tokens, self.train_ids = self.prepare_dataset(args.training)
+        self.test_tokens, self.test_ids = self.prepare_dataset(args.testing)
               
     
     def prepare_dataset(self, path):
@@ -88,10 +86,17 @@ class TwitterCorpus(object):
         ids = self._setup_embedding_layer(path, tokens)
         return tokens, ids
     
-    def _process_tweet(self, tweet):
-        """ Apply feature transformations to each tweet in the dataset """
+    def _process_tweet(self, tweet, depunct):
+        """ Apply feature transformations to each tweet in the dataset 
+        Remove punctuation if depunct """
+        
+        
+        #example1 = BeautifulSoup(df.text[279], 'lxml')
+        #print example1.get_text()        
         
         tweet = tweet.strip()
+        tweet = BeautifulSoup(tweet, 'lxml').get_text()
+        tweet = tweet.replace(u"\ufffd", "?")
         # @usernames -> USERNAME
         tweet = re.sub(self.username_re, lambda x: "USERNAME", tweet)
         # URLS -> URL
@@ -100,9 +105,31 @@ class TwitterCorpus(object):
         tweet = re.sub(self.emoticon_re, lambda x: "", tweet)
         # shrink extended runs of any char
         tweet = re.sub(self.run_on_re, r"\1\1", tweet)  # result = re.sub("(\d+) (\w+)", r"\2 \1")
+        
+        if depunct:
+            depunctuate = str.maketrans('', '', string.punctuation)
+            return tweet.translate(depunctuate)
+        
         return tweet
     
-    def _preprocess_and_build_dictionary(self, inpath, outpath):
+    def _detect_charset(self, path):
+        """ Use chardet to parse the file in path, 
+        and try to best guess the charset.  Clearly not 
+        ascii or utf-8. """
+        
+        from chardet.universaldetector import UniversalDetector
+        detector = UniversalDetector()
+        
+        with open(path, 'r', encoding='utf-8', errors='replace') as f:
+            tweet_reader = csv.reader(f, delimiter=',', quotechar='"')
+            for i,parts in enumerate(tweet_reader):
+                tweet = parts[-1]            
+                detector.feed(tweet.encode('utf-8',errors='replace'))
+                if detector.done: break
+        detector.close()
+        return detector.result    
+    
+    def _preprocess_and_build_dictionary(self, inpath, outpath, depunct=False):
         """ Preprocess the Twitter Sentiment data set in `inpath`,
         build the dictionary, and write the sanitized output to 
         `outpath`.  In addition, return how many tokens
@@ -110,18 +137,23 @@ class TwitterCorpus(object):
         
         assert os.path.exists(inpath)
         
-        with open(inpath, 'r') as in_f, open(outpath,'w') as out_f:
+        #charset = self._detect_charset(inpath)
+        
+        with open(inpath, 'r', encoding='utf-8-sig', errors='replace') as in_f, open(outpath,'w', encoding='utf-8') as out_f:
             tokens = 0
             tweet_reader = csv.reader(in_f, delimiter=',', quotechar='"')
-            for parts in tweet_reader:
+            for i, parts in enumerate(tweet_reader):
+                if (i % 10000) == 0:
+                    print("Finished tweet ", i)
                 tweet = parts[-1]
-                clean_tweet = self._process_tweet(tweet)
+                clean_tweet = self._process_tweet(tweet, depunct)
                 lc_clean_tweet = clean_tweet.lower()
                 words = lc_clean_tweet.split() + ['<eos>']
-                tokens += len(words)
-                for word in words:
+                clean_words = [w for w in words if len(w) > 0]
+                tokens += len(clean_words)
+                for word in clean_words:
                     self.dictionary.add_word(word)
-                clean_line = parts[:-1] + lc_clean_tweet
+                clean_line = parts[:-1] + [lc_clean_tweet]
                 print(','.join(clean_line), file=out_f)
         
         return tokens    

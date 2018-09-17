@@ -6,6 +6,7 @@ import torch.nn as nn
 import torch.optim as optim
 import sys
 import pickle
+import yaml
 
 from torch.autograd import Variable
 from utils import *
@@ -21,38 +22,28 @@ parser.add_argument('--batch_size', type=int, default=32, metavar='N',
                     help='batch size (default: 32)')
 parser.add_argument('--cuda', action='store_false', default=False,
                     help='use CUDA (default: True)')
-parser.add_argument('--dropout', type=float, default=0.0,
-                    help='dropout applied to layers (default: 0)')
+parser.add_argument('--dropout', type=float, default=0.2,
+                    help='dropout applied to top-most fully connected layer (default: 0.2)')
 parser.add_argument('--emb_dropout', type=float, default=0.0,
                     help='dropout applied to the embedded layer (default: 0.0)')
 parser.add_argument('--clip', type=float, default=-1.0,
                     help='gradient clip, -1 means no clip (default: 0.35)')
 parser.add_argument('--epochs', type=int, default=100,
                     help='upper epoch limit (default: 100)')
-parser.add_argument('--ksize', type=int, default=3,
-                    help='kernel size (default: 3)')
-parser.add_argument('--data', type=str, default='./data/penn',
-                    help='location of the data corpus (default: ./data/penn)')
-parser.add_argument('--emsize', type=int, default=600,
-                    help='size of word embeddings (default: 600)')
-parser.add_argument('--levels', type=int, default=4,
-                    help='# of levels (default: 4)')
+parser.add_argument('--data', type=str, default='./data/sentiment',
+                    help='location of the data corpus (default: ./data/sentiment)')
+parser.add_argument('--training', type=str, default='./data/training.1600000.processed.noemoticon.csv',
+                    help='location of the training data csv file')
+parser.add_argument('--testing', type=str, default='./data/testdata.manual.2009.06.14.csv',
+                    help='location of the test data csv file')
 parser.add_argument('--log-interval', type=int, default=100, metavar='N',
                     help='report interval (default: 100)')
 parser.add_argument('--lr', type=float, default=4,
                     help='initial learning rate (default: 4)')
-parser.add_argument('--nhid', type=int, default=600,
-                    help='number of hidden units per layer (default: 600)')
 parser.add_argument('--seed', type=int, default=1111,
                     help='random seed (default: 1111)')
-parser.add_argument('--tied', action='store_false',
-                    help='tie the encoder-decoder weights (default: True)')
-parser.add_argument('--optim', type=str, default='SGD',
-                    help='optimizer type (default: SGD)')
-parser.add_argument('--validseqlen', type=int, default=40,
-                    help='valid sequence length (default: 40)')
-parser.add_argument('--seq_len', type=int, default=80,
-                    help='total sequence length, including effective history (default: 80)')
+parser.add_argument('--optim', type=str, default='adagrad',
+                    help='optimizer type (default: Adagrad)')
 parser.add_argument('--corpus', action='store_true',
                     help='force re-make the corpus (default: False)')
 args = parser.parse_args()
@@ -64,20 +55,26 @@ if torch.cuda.is_available():
         print("WARNING: You have a CUDA device, so you should probably run with --cuda")
 
 print(args)
+with open('./dcnn_repro.yaml','r') as f:
+    repro_model_params = yaml.load(f)
+    num_maps = repro_model_params['num_maps']
+    k_top = repro_model_params['k_top']
+    output_size = repro_model_params['output_size']
+    kernel_sizes = repro_model_params['kernel_sizes']
+    embedding_size = repro_model_params['embedding_size']
+    dropout = repro_model_params['dropout']
+    
 corpus = data_generator(args)
+n_words = len(corpus.dictionary)
 eval_batch_size = 10
+
+
+
 train_data = batchify(corpus.train, args.batch_size, args)
 val_data = batchify(corpus.valid, eval_batch_size, args)
 test_data = batchify(corpus.test, eval_batch_size, args)
 
 
-n_words = len(corpus.dictionary)
-
-num_chans = [args.nhid] * (args.levels - 1) + [args.emsize]
-k_size = args.ksize
-dropout = args.dropout
-emb_dropout = args.emb_dropout
-tied = args.tied
 model = TCN(args.emsize, n_words, num_chans, dropout=dropout, emb_dropout=emb_dropout, kernel_size=k_size, tied_weights=tied)
 
 if args.cuda:

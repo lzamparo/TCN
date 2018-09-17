@@ -1,0 +1,6 @@
+embedding_size: 60
+kernel_sizes: [7, 5]
+num_maps: [6, 14]
+k_top: 4
+output_size: 3
+dropout: 0.2
