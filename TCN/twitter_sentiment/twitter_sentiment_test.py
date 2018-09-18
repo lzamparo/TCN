@@ -68,14 +68,17 @@ corpus = data_generator(args)
 n_words = len(corpus.dictionary)
 eval_batch_size = 10
 
-
-
 train_data = batchify(corpus.train, args.batch_size, args)
 val_data = batchify(corpus.valid, eval_batch_size, args)
 test_data = batchify(corpus.test, eval_batch_size, args)
 
-
-model = TCN(args.emsize, n_words, num_chans, dropout=dropout, emb_dropout=emb_dropout, kernel_size=k_size, tied_weights=tied)
+model = DCNN(embedding_size=embedding_size,
+             vocab_size=n_words,
+             num_maps=num_maps, 
+             kernel_sizes=kernel_sizes, 
+             k_top=k_top,
+             output_size=output_size,
+             dropout=dropout)
 
 if args.cuda:
     model.cuda()
@@ -172,13 +175,11 @@ if __name__ == "__main__":
         for epoch in range(1, args.epochs+1):
             epoch_start_time = time.time()
             train()
-            val_loss = evaluate(val_data)
             test_loss = evaluate(test_data)
+            test_errors = evaluate(test_data)
 
-            writer.add_scalar('valid loss', val_loss)
-            writer.add_scalar('valid perplexity', math.exp(val_loss))
             writer.add_scalar('test loss', test_loss)
-            writer.add_scalar('test perplexity', math.exp(test_loss))
+            writer.add_scalar('test errors', )
 
             print('-' * 89)
             print('| end of epoch {:3d} | time: {:5.2f}s | valid loss {:5.2f} | '

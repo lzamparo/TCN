@@ -7,7 +7,7 @@ import torch
 
 from torch.autograd import Variable
 from bs4 import BeautifulSoup
-
+from nltk.tokenize import WordPunctTokenizer
 
 def data_generator(args):
     if os.path.exists(args.data + "/corpus") and not args.corpus:
@@ -72,8 +72,15 @@ class TwitterCorpus(object):
         
         self.username_re = re.compile("\@[\w]+")
         self.url_re = re.compile("http[s]?://[\w|\.|\?|\/]+")
+        self.www_re = re.compile("www.[^ ]+")
         self.emoticon_re = re.compile("(;D)|(:D)|(:/)|(=\))|(:-D)|(;-D)|(:\()|(=\()|(:\s{1}\()")
-        self.run_on_re = re.compile(r"(\w)\1{2,}", re.DOTALL)        
+        self.run_on_re = re.compile(r"(\w)\1{2,}", re.DOTALL)
+        self.negations_dic = {"isn't":"is not", "aren't":"are not", "wasn't":"was not", "weren't":"were not",
+                         "haven't":"have not","hasn't":"has not","hadn't":"had not","won't":"will not",
+                        "wouldn't":"would not", "don't":"do not", "doesn't":"does not","didn't":"did not",
+                        "can't":"can not","couldn't":"could not","shouldn't":"should not","mightn't":"might not",
+                        "mustn't":"must not"}
+        self.neg_pattern = re.compile(r'\b(' + '|'.join(self.negations_dic.keys()) + r')\b')        
         
         self.train_tokens, self.train_ids = self.prepare_dataset(args.training)
         self.test_tokens, self.test_ids = self.prepare_dataset(args.testing)
@@ -83,16 +90,14 @@ class TwitterCorpus(object):
         """ Preprocess the dataset in `path` """
         outpath = path.replace(".csv",".prepared.csv")
         tokens = self._preprocess_and_build_dictionary(path, outpath)
-        ids = self._setup_embedding_layer(path, tokens)
+        ids = self._setup_embedding_layer(outpath, tokens)
         return tokens, ids
     
-    def _process_tweet(self, tweet, depunct):
-        """ Apply feature transformations to each tweet in the dataset 
-        Remove punctuation if depunct """
-        
-        
-        #example1 = BeautifulSoup(df.text[279], 'lxml')
-        #print example1.get_text()        
+    def _process_tweet(self, tweet):
+        """ Apply feature transformations to each tweet in the dataset """
+   
+        # unique tokens with this, no depunct: 755992
+        # removing single char tokens, expanding contractions: 277990
         
         tweet = tweet.strip()
         tweet = BeautifulSoup(tweet, 'lxml').get_text()
@@ -101,14 +106,15 @@ class TwitterCorpus(object):
         tweet = re.sub(self.username_re, lambda x: "USERNAME", tweet)
         # URLS -> URL
         tweet = re.sub(self.url_re, lambda x: "URL", tweet)
+        # www. URLs -> URL
+        tweet = re.sub(self.www_re, lambda x: "URL", tweet)
+        # expand negation contractions
+        tweet = re.sub(self.neg_pattern, lambda x: self.negations_dic[x.group()], tweet)
+        
         # standardize emoticons
         tweet = re.sub(self.emoticon_re, lambda x: "", tweet)
         # shrink extended runs of any char
         tweet = re.sub(self.run_on_re, r"\1\1", tweet)  # result = re.sub("(\d+) (\w+)", r"\2 \1")
-        
-        if depunct:
-            depunctuate = str.maketrans('', '', string.punctuation)
-            return tweet.translate(depunctuate)
         
         return tweet
     
@@ -129,54 +135,54 @@ class TwitterCorpus(object):
         detector.close()
         return detector.result    
     
-    def _preprocess_and_build_dictionary(self, inpath, outpath, depunct=False):
+    def _preprocess_and_build_dictionary(self, inpath, outpath, depunct=True):
         """ Preprocess the Twitter Sentiment data set in `inpath`,
         build the dictionary, and write the sanitized output to 
-        `outpath`.  In addition, return how many tokens
+        `outpath`.  In addition, return how many unique tokens
         we see in the corpus. """
         
         assert os.path.exists(inpath)
-        
-        #charset = self._detect_charset(inpath)
-        
+        if depunct:
+            tok = WordPunctTokenizer()
+            
         with open(inpath, 'r', encoding='utf-8-sig', errors='replace') as in_f, open(outpath,'w', encoding='utf-8') as out_f:
-            tokens = 0
             tweet_reader = csv.reader(in_f, delimiter=',', quotechar='"')
+            tweet_writer = csv.writer(out_f, delimiter=',', quotechar='"')
+            
             for i, parts in enumerate(tweet_reader):
                 if (i % 10000) == 0:
                     print("Finished tweet ", i)
                 tweet = parts[-1]
-                clean_tweet = self._process_tweet(tweet, depunct)
+                clean_tweet = self._process_tweet(tweet)
                 lc_clean_tweet = clean_tweet.lower()
-                words = lc_clean_tweet.split() + ['<eos>']
-                clean_words = [w for w in words if len(w) > 0]
-                tokens += len(clean_words)
-                for word in clean_words:
+                words = [w for w in tok.tokenize(lc_clean_tweet) if len(w) > 1] + ['<eos>']
+    
+                for word in words:
                     self.dictionary.add_word(word)
-                clean_line = parts[:-1] + [lc_clean_tweet]
-                print(','.join(clean_line), file=out_f)
-        
-        return tokens    
+                
+                clean_line = parts[:-1] + " ".join(words)
+                tweet_writer.writerow(clean_line)
+                
+        unique_tokens = len(self.dictionary)
+        return unique_tokens    
         
     def _setup_embedding_layer(self, path, tokens):
         """ Build the word2idx dict for the Twitter Sentiment data set in `path` """
         
         assert os.path.exists(path)
         
-        with open(path, 'r') as f:
+        with open(path, 'r', encoding='utf-8-sig', errors='replace') as f:
             ids = torch.LongTensor(tokens)
             token = 0
             tweet_reader = csv.reader(f, delimiter=',', quotechar='"')
             for parts in tweet_reader:
                 tweet = parts[-1]
-                words = tweet.split() + ['<eos>']
+                words = tweet.split()
                 for word in words:
                     ids[token] = self.dictionary.word2idx[word]
                     token += 1
         return ids
     
-    
-
 
 def batchify(data, batch_size, args):
     """The output should have size [L x batch_size], where L could be a long sequence length"""

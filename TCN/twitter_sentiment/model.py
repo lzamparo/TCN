@@ -44,13 +44,15 @@ class WideConvBlock(nn.Module):
 class DCNN(nn.Module):
 
     def __init__(self, embedding_size=60, vocab_size=60000, num_maps=[6,14],
-                 kernel_sizes=[7,5], k_top=4, output_size=3):
+                 kernel_sizes=[7,5], k_top=4, output_size=3, dropout=0.2):
         """ DCNN of Denil et al. implemented from their paper
         embedding_size := embedding dimension size
         vocab_size := size of the vocabulary 
         num_maps := list, where ith entry is the number of feature maps in the ith layer 
         kernel_sizes := list, same size as num_channels, size of Conv1D kernel for that layer 
         k_top := the smallest size of temporal pooling window
+        droput := the amount of dropout to apply to the penultimate layer 
+        output_size := cardinality of the label space
         
         N.B: there is pooling, but size of pooling is determined by the size of the output of the 
         convolutional layers (c.f Denil et al.)
@@ -60,7 +62,6 @@ class DCNN(nn.Module):
         assert(len(num_maps) == len(kernel_sizes))
         self.encoder = nn.Embedding(vocab_size, embedding_size)
      
-        ### fill this with the appropriate DCNN-style model
         layers = []
         L = len(num_maps)
         for i in len(num_maps):
@@ -69,6 +70,7 @@ class DCNN(nn.Module):
             # n_inputs, n_outputs, kernel_size, stride, k_top, L, l
             layers += [WideConvBlock(n_inputs=in_channels,n_outputs=out_channels, stride=1, 
                                     k_top=k_top, L=L, l=i)]
+        
             
         self.network = nn.Sequential(*layers)
         self.decoder = nn.Linear(num_maps[-1], output_size)
@@ -82,10 +84,11 @@ class DCNN(nn.Module):
 
     def forward(self, input):
         """Input ought to have dimension (N, C_in, L_in), where L_in is the seq_len; here the input is (N, L, C)"""
+        
         emb = self.encoder(input)
-        y = self.network(emb)
-        y = self.decoder(y) ## softmax needs to be applied here
-        return nn.functional.softmax(y)
+        y_hat = self.network(emb)
+        y_hat = self.decoder(y_hat) ## softmax needs to be applied here
+        return nn.functional.softmax(y_hat)
 
 
 
