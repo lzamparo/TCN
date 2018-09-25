@@ -70,7 +70,6 @@ class DCNN(nn.Module):
             # n_inputs, n_outputs, kernel_size, stride, k_top, L, l
             layers += [WideConvBlock(n_inputs=in_channels,n_outputs=out_channels, stride=1, 
                                     k_top=k_top, L=L, l=i)]
-        
             
         self.network = nn.Sequential(*layers)
         self.decoder = nn.Linear(num_maps[-1], output_size)

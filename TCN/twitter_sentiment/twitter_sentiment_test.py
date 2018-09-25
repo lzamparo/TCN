@@ -68,9 +68,8 @@ corpus = data_generator(args)
 n_words = len(corpus.dictionary)
 eval_batch_size = 10
 
-train_data = batchify(corpus.train, args.batch_size, args)
-val_data = batchify(corpus.valid, eval_batch_size, args)
-test_data = batchify(corpus.test, eval_batch_size, args)
+train_data = batchify(corpus.train_ids, args.batch_size, args)
+test_data = batchify(corpus.test_ids, eval_batch_size, args)
 
 model = DCNN(embedding_size=embedding_size,
              vocab_size=n_words,

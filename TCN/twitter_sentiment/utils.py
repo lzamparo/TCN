@@ -4,6 +4,8 @@ import csv
 import string
 import pickle
 import torch
+import h5py
+import numpy as np
 
 from torch.autograd import Variable
 from bs4 import BeautifulSoup
@@ -33,39 +35,6 @@ class Dictionary(object):
         return len(self.idx2word)
 
 
-class Corpus(object):
-    def __init__(self, path):
-        self.dictionary = Dictionary()
-        self.train = self.tokenize(os.path.join(path, 'train.txt'))
-        self.valid = self.tokenize(os.path.join(path, 'valid.txt'))
-        self.test = self.tokenize(os.path.join(path, 'test.txt'))
-
-    def tokenize(self, path):
-        """Tokenizes a text file."""
-        assert os.path.exists(path)
-        # Add words to the dictionary
-        with open(path, 'r') as f:
-            tokens = 0
-            for line in f:
-                words = line.split() + ['<eos>']
-                tokens += len(words)
-                for word in words:
-                    self.dictionary.add_word(word)
-
-        # Tokenize file content
-        with open(path, 'r') as f:
-            ids = torch.LongTensor(tokens)
-            token = 0
-            for line in f:
-                words = line.split() + ['<eos>']
-                for word in words:
-                    
-                    ids[token] = self.dictionary.word2idx[word]
-                    token += 1
-
-        return ids
-
-
 class TwitterCorpus(object):
     def __init__(self, args):
         self.dictionary = Dictionary()
@@ -82,16 +51,18 @@ class TwitterCorpus(object):
                         "mustn't":"must not"}
         self.neg_pattern = re.compile(r'\b(' + '|'.join(self.negations_dic.keys()) + r')\b')        
         
-        self.train_tokens, self.train_ids = self.prepare_dataset(args.training)
-        self.test_tokens, self.test_ids = self.prepare_dataset(args.testing)
+        self.datafile = h5py.File(os.path.join(args.data,"tweet_data.h5"), 'w')
+        self.prepare_dataset(args.training, 'training')
+        self.prepare_dataset(args.testing, 'testing')
               
     
-    def prepare_dataset(self, path):
-        """ Preprocess the dataset in `path` """
+    def prepare_dataset(self, path, data_split):
+        """ Preprocess the dataset in `path` 
+        data_split \in ['training','testing'] """
+        
         outpath = path.replace(".csv",".prepared.csv")
-        tokens = self._preprocess_and_build_dictionary(path, outpath)
-        ids = self._setup_embedding_layer(outpath, tokens)
-        return tokens, ids
+        tokens, max_len, num_tweets = self._preprocess_and_build_dictionary(path, outpath)
+        self._pack_to_h5(outpath, data_split, tokens, max_len, num_tweets)
     
     def _process_tweet(self, tweet):
         """ Apply feature transformations to each tweet in the dataset """
@@ -139,7 +110,12 @@ class TwitterCorpus(object):
         """ Preprocess the Twitter Sentiment data set in `inpath`,
         build the dictionary, and write the sanitized output to 
         `outpath`.  In addition, return how many unique tokens
-        we see in the corpus. """
+        we see in the corpus. 
+        
+        return the number of unique tokens seen, the largest number
+        of words seen in a single tweet, and the number of tweets 
+        in this file.
+        """
         
         assert os.path.exists(inpath)
         if depunct:
@@ -148,6 +124,7 @@ class TwitterCorpus(object):
         with open(inpath, 'r', encoding='utf-8-sig', errors='replace') as in_f, open(outpath,'w', encoding='utf-8') as out_f:
             tweet_reader = csv.reader(in_f, delimiter=',', quotechar='"')
             tweet_writer = csv.writer(out_f, delimiter=',', quotechar='"')
+            max_len = 0
             
             for i, parts in enumerate(tweet_reader):
                 if (i % 10000) == 0:
@@ -155,33 +132,69 @@ class TwitterCorpus(object):
                 tweet = parts[-1]
                 clean_tweet = self._process_tweet(tweet)
                 lc_clean_tweet = clean_tweet.lower()
-                words = [w for w in tok.tokenize(lc_clean_tweet) if len(w) > 1] + ['<eos>']
-    
+                words = [w for w in tok.tokenize(lc_clean_tweet) if len(w) > 1]
+                max_len = len(words) if len(words) > max_len else max_len
+                
                 for word in words:
                     self.dictionary.add_word(word)
                 
-                clean_line = parts[:-1] + " ".join(words)
+                clean_line = parts[:-1] + [" ".join(words)]
                 tweet_writer.writerow(clean_line)
                 
         unique_tokens = len(self.dictionary)
-        return unique_tokens    
+        return unique_tokens, max_len, i    
+    
+
+    def _pack_to_h5(self, path, group, tokens, max_len, num_examples):
+        """ Build the word2idx data structure for the Twitter Sentiment data set in `path` 
+        I'll use an hdf5 file to store the embedded seqs, labels.
         
-    def _setup_embedding_layer(self, path, tokens):
-        """ Build the word2idx dict for the Twitter Sentiment data set in `path` """
+        path := path to cleaned up tweet file
+        tokens := number of tokens to encode
+        group := 'training' or 'testing', which group in the h5 file
+                do we encode the data from `path`
+        max_len := most number of words observed in a tweet
+        num_examples := number of tweets in this file in `path`
+        """
+
+        def _tweet_to_list(self, parts, max_len):
+            label, tweet = parts[0], parts[-1]
+            words = tweet.split()
+            encoded_words = [self.dictionary.word2idx[word] for word in words]
+            encoded_words = encoded_words + [-1 for i in range(max_len - len(
+                words))]
+            assert(len(encoded_words) == max_len)
+            return encoded_words, label
         
         assert os.path.exists(path)
+        
+        # create groups for data, labels
+        group_name = '/' + group
+        this_group = self.datafile.create_group()
+        data_name = group + "_data"
+        label_name = group + "_labels"
+        data = this_group.create_dataset(data_name, shape=(num_examples,max_len), chunks=(10000,max_len), dtype=np.i4)
+        labels = this_group.create_dataset(label_name, shape=(num_examples,1), dtype=np.i4)
+        
+        # parse, encode words in each tweet, write to h5file
+        chunk = 0  
+        chunk_size = 10000
+        temp_array = np.empty((10000,max_len))
+        temp_labels = np.empty((10000,1))
         
         with open(path, 'r', encoding='utf-8-sig', errors='replace') as f:
             ids = torch.LongTensor(tokens)
             token = 0
             tweet_reader = csv.reader(f, delimiter=',', quotechar='"')
-            for parts in tweet_reader:
-                tweet = parts[-1]
-                words = tweet.split()
-                for word in words:
-                    ids[token] = self.dictionary.word2idx[word]
-                    token += 1
-        return ids
+            for i, parts in enumerate(tweet_reader):
+                embedded_list, label = self._tweet_to_list(parts, max_len)
+                temp_array[:,i] = np.array(embedded_list)
+                temp_labels[i,0] = label
+                if i % 10000 == 0:
+                    # write to the h5file
+                    data[chunk*chunk_size : (chunk+1) * chunk_size, :] = temp_array
+                    labels[chunk * chunk_size : (chunk+1) * chunk_size,0] = temp_labels
+                    chunk += 1
     
 
 def batchify(data, batch_size, args):
