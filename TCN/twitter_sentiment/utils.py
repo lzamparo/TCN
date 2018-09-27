@@ -1,4 +1,5 @@
 import os
+import sys
 import re
 import csv
 import string
@@ -7,6 +8,7 @@ import torch
 import h5py
 import numpy as np
 
+from torch.utils.data import Dataset
 from torch.autograd import Variable
 from bs4 import BeautifulSoup
 from nltk.tokenize import WordPunctTokenizer
@@ -39,6 +41,7 @@ class TwitterCorpus(object):
     def __init__(self, args):
         self.dictionary = Dictionary()
         
+        self.file_prepared = False
         self.username_re = re.compile("\@[\w]+")
         self.url_re = re.compile("http[s]?://[\w|\.|\?|\/]+")
         self.www_re = re.compile("www.[^ ]+")
@@ -51,10 +54,34 @@ class TwitterCorpus(object):
                         "mustn't":"must not"}
         self.neg_pattern = re.compile(r'\b(' + '|'.join(self.negations_dic.keys()) + r')\b')        
         
-        self.datafile = h5py.File(os.path.join(args.data,"tweet_data.h5"), 'w')
+        self.datafile = os.path.join(args.data,"tweet_data.h5")
+        self.data_handle = h5py.File(os.path.join(args.data,"tweet_data.h5"), 'w')
         self.prepare_dataset(args.training, 'training')
         self.prepare_dataset(args.testing, 'testing')
-              
+        self.data_handle.close()
+        self.file_prepared = True
+        
+    def __getstate__(self):
+        ''' Do not pickle the handle to the h5 file '''
+        state = self.__dict__.copy()
+        del state['data_handle']
+        return state
+
+
+    def __setstate__(self, state):
+        
+        self.__dict__.update(state)
+        if os.path.exists(self.datafile):
+            self.file_prepared = True
+        else:
+            self.file_prepared = False
+                  
+    
+    def get_data_file(self):
+        if self.file_prepared:
+            return self.datafile
+        else:
+            print('File is not prepared.  Re-build TwitterCorpus object properly.', file=sys.stderr)
     
     def prepare_dataset(self, path, data_split):
         """ Preprocess the dataset in `path` 
@@ -142,9 +169,33 @@ class TwitterCorpus(object):
                 tweet_writer.writerow(clean_line)
                 
         unique_tokens = len(self.dictionary)
-        return unique_tokens, max_len, i    
+        return unique_tokens, max_len, i+1    
     
+    def _tweet_to_list(self, parts, max_len):
+        label, tweet = parts[0], parts[-1]
+        
+        try:
+            label = int(label)
+        except ValueError:
+            print('Cannot coerce ', label, ' to int ')
+            label = -1
+        words = tweet.split()
+        encoded_words = [self.dictionary.word2idx[word] for word in words]
+        encoded_words = encoded_words + [-1 for i in range(max_len - len(
+            words))]
+        assert(len(encoded_words) == max_len)
+        return encoded_words, label   
 
+
+    def _calculate_amount_to_write(self, chunk, chunk_size, num_examples):
+        amount_to_write = num_examples - (chunk * chunk_size)
+        if amount_to_write < 0:
+            amount_to_write = num_examples
+        if amount_to_write < chunk_size:
+            return amount_to_write
+        else:   
+            return chunk_size
+    
     def _pack_to_h5(self, path, group, tokens, max_len, num_examples):
         """ Build the word2idx data structure for the Twitter Sentiment data set in `path` 
         I'll use an hdf5 file to store the embedded seqs, labels.
@@ -156,31 +207,28 @@ class TwitterCorpus(object):
         max_len := most number of words observed in a tweet
         num_examples := number of tweets in this file in `path`
         """
-
-        def _tweet_to_list(self, parts, max_len):
-            label, tweet = parts[0], parts[-1]
-            words = tweet.split()
-            encoded_words = [self.dictionary.word2idx[word] for word in words]
-            encoded_words = encoded_words + [-1 for i in range(max_len - len(
-                words))]
-            assert(len(encoded_words) == max_len)
-            return encoded_words, label
         
         assert os.path.exists(path)
         
         # create groups for data, labels
         group_name = '/' + group
-        this_group = self.datafile.create_group()
+        this_group = self.data_handle.create_group(group_name)
         data_name = group + "_data"
         label_name = group + "_labels"
-        data = this_group.create_dataset(data_name, shape=(num_examples,max_len), chunks=(10000,max_len), dtype=np.i4)
-        labels = this_group.create_dataset(label_name, shape=(num_examples,1), dtype=np.i4)
+        
+        chunk = 0  
+        chunk_size = 10000        
+        buffer_size = self._calculate_amount_to_write(chunk, chunk_size, 
+                                                  num_examples)
+    
+        data = this_group.create_dataset(data_name, shape=(num_examples,max_len), chunks=(buffer_size,max_len), dtype=np.int32)
+        labels = this_group.create_dataset(label_name, shape=(num_examples,1), dtype=np.int32)
         
         # parse, encode words in each tweet, write to h5file
-        chunk = 0  
-        chunk_size = 10000
-        temp_array = np.empty((10000,max_len))
-        temp_labels = np.empty((10000,1))
+        temp_array = np.empty((chunk_size,max_len),dtype=np.int32)
+        temp_labels = np.empty((chunk_size,1), dtype=np.int32)        
+        
+        
         
         with open(path, 'r', encoding='utf-8-sig', errors='replace') as f:
             ids = torch.LongTensor(tokens)
@@ -188,30 +236,59 @@ class TwitterCorpus(object):
             tweet_reader = csv.reader(f, delimiter=',', quotechar='"')
             for i, parts in enumerate(tweet_reader):
                 embedded_list, label = self._tweet_to_list(parts, max_len)
-                temp_array[:,i] = np.array(embedded_list)
-                temp_labels[i,0] = label
-                if i % 10000 == 0:
-                    # write to the h5file
-                    data[chunk*chunk_size : (chunk+1) * chunk_size, :] = temp_array
-                    labels[chunk * chunk_size : (chunk+1) * chunk_size,0] = temp_labels
+                temp_array[i % chunk_size,:] = np.array(embedded_list)
+                temp_labels[i % chunk_size,0] = label
+                if (i + 1) % buffer_size == 0:
+                    # write the buffer to the h5file
+                    data[chunk*chunk_size : chunk*chunk_size + buffer_size, :] = temp_array[0:buffer_size,:]
+                    labels[chunk*chunk_size : chunk*chunk_size + buffer_size, 0] = temp_labels[0:buffer_size,0]
                     chunk += 1
+                    buffer_size = self._calculate_amount_to_write(chunk, chunk_size, 
+                                                                          num_examples)                          
+        
+        
+class TwitterCorpus_Training(Dataset):
+    """ Load up the encoded Twitter corpus dataset for training"""
     
-
-def batchify(data, batch_size, args):
-    """The output should have size [L x batch_size], where L could be a long sequence length"""
-    # Work out how cleanly we can divide the dataset into batch_size parts (i.e. continuous seqs).
-    nbatch = data.size(0) // batch_size
-    # Trim off any extra elements that wouldn't cleanly fit (remainders).
-    data = data.narrow(0, 0, nbatch * batch_size)
-    # Evenly divide the data across the batch_size batches.
-    data = data.view(batch_size, -1)
-    if args.cuda:
-        data = data.cuda()
-    return data
-
-
-def get_batch(source, i, args, seq_len=None, evaluation=False):
-    seq_len = min(seq_len if seq_len else args.seq_len, source.size(1) - 1 - i)
-    data = Variable(source[:, i:i+seq_len], volatile=evaluation)
-    target = Variable(source[:, i+1:i+1+seq_len])     # CAUTION: This is un-flattened!
-    return data, target
+    def __init__(self, h5_filepath, transform=None):
+        
+        self.h5f = h5py.File(h5_filepath, 'r', libver='latest', swmr=True)
+        self.num_entries, self.max_length = self.h5f['/training/training_data'].shape
+        self.transform = transform
+        
+    def __getitem__(self, index):
+        
+        features = self.h5f['/training/training_data'][index]
+        labels = self.h5f['/training/training_labels'][index]
+        if self.transform is not None:
+            features = self.transform(features)
+        return features, labels
+    
+    def __len__(self):
+        return self.num_entries
+    
+    def close(self):
+        self.h5f.close()
+        
+class TwitterCorpus_Testing(Dataset):
+    """ Load up the encoded Twitter corpus dataset for training"""
+    
+    def __init__(self, h5_filepath, transform=None):
+        
+        self.h5f = h5py.File(h5_filepath, 'r', libver='latest', swmr=True)
+        self.num_entries, self.max_length = self.h5f['/testing/testing_data'].shape
+        self.transform = transform
+        
+    def __getitem__(self, index):
+        
+        features = self.h5f['/testing/testing_data'][index]
+        labels = self.h5f['/testing/testing_labels'][index]
+        if self.transform is not None:
+            features = self.transform(features)
+        return features, labels
+    
+    def __len__(self):
+        return self.num_entries
+    
+    def close(self):
+        self.h5f.close()

@@ -64,7 +64,7 @@ class DCNN(nn.Module):
      
         layers = []
         L = len(num_maps)
-        for i in len(num_maps):
+        for i in range(len(num_maps)):
             in_channels = embedding_size if i == 0 else num_maps[i-1]
             out_channels = num_maps[i]
             # n_inputs, n_outputs, kernel_size, stride, k_top, L, l

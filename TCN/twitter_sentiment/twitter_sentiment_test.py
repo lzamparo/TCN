@@ -66,10 +66,11 @@ with open('./dcnn_repro.yaml','r') as f:
     
 corpus = data_generator(args)
 n_words = len(corpus.dictionary)
+h5_file = corpus.get_data_file()
 eval_batch_size = 10
 
-train_data = batchify(corpus.train_ids, args.batch_size, args)
-test_data = batchify(corpus.test_ids, eval_batch_size, args)
+train_data = TwitterCorpus_Training(h5_file)
+test_data = TwitterCorpus_Testing(h5_file)
 
 model = DCNN(embedding_size=embedding_size,
              vocab_size=n_words,
