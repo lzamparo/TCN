@@ -142,7 +142,7 @@ def train():
         if args.cuda:
             x = x.cuda()
             y = y.cuda()
-            print("sent x, y to device")
+    
         
         optimizer.zero_grad()
         output = model(x)
