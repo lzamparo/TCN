@@ -250,6 +250,24 @@ class TwitterCorpus(object):
                     chunk += 1
                     buffer_size = self._calculate_amount_to_write(chunk, chunk_size, 
                                                                           num_examples)                          
+
+
+class PaddingTransformer(object):
+    """ Pad the features to a given length with the padding token """
+    
+    def __init__(self, length, token):
+        self.length = length
+        self.token = token
+        
+    def __call__(self, features):
+        rows, cols = features.shape
+        to_pad = self.length - cols
+        padded_features = np.zeros((rows, self.length))
+        padded_features[:,0:cols] = features[:]
+        padded_features[:,cols:] = self.token
+        
+        return padded_features
+    
         
 class RecodeLabel(object):
     """ Re-code the Twitter sentiment labels to be contiguous integer labels 
@@ -296,6 +314,9 @@ class TwitterCorpus_Training(Dataset):
     
     def __len__(self):
         return self.num_entries
+    
+    def get_max_length(self):
+        return self.max_length
     
     def close(self):
         self.h5f.close()

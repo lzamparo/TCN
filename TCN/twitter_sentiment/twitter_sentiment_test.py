@@ -69,12 +69,14 @@ with open('./dcnn_repro.yaml','r') as f:
 corpus = data_generator(args)
 n_words = len(corpus.dictionary)
 h5_file = corpus.get_data_file()
-eval_batch_size = 10
+eval_batch_size = 32
 
 recoding_transform = RecodeLabel()
-
 train_data = TwitterCorpus_Training(h5_file, label_transform=recoding_transform)
-valid_data = TwitterCorpus_Testing(h5_file, label_transform=recoding_transform)
+
+max_length = train_data.get_max_length()
+padding_transform = PaddingTransformer(max_length, corpus.get_padding_idx())
+valid_data = TwitterCorpus_Testing(h5_file, transform=padding_transform, label_transform=recoding_transform)
 
 train_loader = DataLoader(train_data, 
                           batch_size=args.batch_size,
