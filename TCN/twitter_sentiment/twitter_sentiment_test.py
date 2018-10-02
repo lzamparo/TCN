@@ -116,8 +116,8 @@ def evaluate():
         y = y.squeeze()
         
         if args.cuda:
-            x.cuda()
-            y.cuda()
+            x = x.cuda()
+            y = y.cuda()
         output = model(x)
         loss = criterion(output, y)
 
@@ -140,8 +140,8 @@ def train():
         y = y.squeeze()
         
         if args.cuda:
-            x.cuda()
-            y.cuda()
+            x = x.cuda()
+            y = y.cuda()
             print("sent x, y to device")
         
         optimizer.zero_grad()
