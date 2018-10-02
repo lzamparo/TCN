@@ -40,6 +40,8 @@ class Dictionary(object):
 class TwitterCorpus(object):
     def __init__(self, args):
         self.dictionary = Dictionary()
+        self.dictionary.add_word("<<<padding>>>")
+        self.padding_value = self.dictionary.word2idx["<<<padding>>>"]
         
         self.file_prepared = False
         self.username_re = re.compile("\@[\w]+")
@@ -56,6 +58,7 @@ class TwitterCorpus(object):
         
         self.datafile = os.path.join(args.data,"tweet_data.h5")
         self.data_handle = h5py.File(os.path.join(args.data,"tweet_data.h5"), 'w')
+        
         self.prepare_dataset(args.training, 'training')
         self.prepare_dataset(args.testing, 'testing')
         self.data_handle.close()
@@ -75,7 +78,9 @@ class TwitterCorpus(object):
             self.file_prepared = True
         else:
             self.file_prepared = False
-                  
+     
+    def get_padding_idx(self):
+        return self.padding_value
     
     def get_data_file(self):
         if self.file_prepared:
@@ -181,7 +186,7 @@ class TwitterCorpus(object):
             label = -1
         words = tweet.split()
         encoded_words = [self.dictionary.word2idx[word] for word in words]
-        encoded_words = encoded_words + [-1 for i in range(max_len - len(
+        encoded_words = encoded_words + [self.padding_value for i in range(max_len - len(
             words))]
         assert(len(encoded_words) == max_len)
         return encoded_words, label   
@@ -246,22 +251,47 @@ class TwitterCorpus(object):
                     buffer_size = self._calculate_amount_to_write(chunk, chunk_size, 
                                                                           num_examples)                          
         
+class RecodeLabel(object):
+    """ Re-code the Twitter sentiment labels to be contiguous integer labels 
+    between zero and two, as there are only three classes """
+    
+    def __init__(self):
+        self.labelcode = {0: 0, 2: 1, 4: 2}
         
+    def __call__(self, label):
+        recoded = np.zeros_like(label)
+        for i,l in enumerate(label):
+            recoded[i] = self.labelcode[l]
+        
+        return recoded
+
+
 class TwitterCorpus_Training(Dataset):
     """ Load up the encoded Twitter corpus dataset for training"""
     
-    def __init__(self, h5_filepath, transform=None):
+    def __init__(self, h5_filepath, transform=None, label_transform=None):
         
         self.h5f = h5py.File(h5_filepath, 'r', libver='latest', swmr=True)
         self.num_entries, self.max_length = self.h5f['/training/training_data'].shape
         self.transform = transform
+        self.label_transform = label_transform
         
     def __getitem__(self, index):
         
         features = self.h5f['/training/training_data'][index]
         labels = self.h5f['/training/training_labels'][index]
-        if self.transform is not None:
+        #np.place(features,features == -1, [self.padding_idx])
+        
+        if self.transform:
             features = self.transform(features)
+        features = torch.from_numpy(features)
+        features = features.long()
+        
+        if self.label_transform:
+            labels = self.label_transform(labels)
+        labels = torch.from_numpy(labels)
+        labels = labels.long()
+
         return features, labels
     
     def __len__(self):
@@ -273,18 +303,29 @@ class TwitterCorpus_Training(Dataset):
 class TwitterCorpus_Testing(Dataset):
     """ Load up the encoded Twitter corpus dataset for training"""
     
-    def __init__(self, h5_filepath, transform=None):
+    def __init__(self, h5_filepath, transform=None, label_transform=None):
         
         self.h5f = h5py.File(h5_filepath, 'r', libver='latest', swmr=True)
         self.num_entries, self.max_length = self.h5f['/testing/testing_data'].shape
         self.transform = transform
+        self.label_transform = label_transform
         
     def __getitem__(self, index):
         
         features = self.h5f['/testing/testing_data'][index]
         labels = self.h5f['/testing/testing_labels'][index]
-        if self.transform is not None:
-            features = self.transform(features)
+        #np.place(features,features == -1, [self.padding_idx])
+        
+        if self.transform:
+            features = self.transform(features)        
+        features = torch.from_numpy(features)
+        features = features.long()
+        
+        if self.label_transform:
+            labels = self.label_transform(labels)
+        labels = torch.from_numpy(labels)
+        labels = labels.long()
+        
         return features, labels
     
     def __len__(self):
