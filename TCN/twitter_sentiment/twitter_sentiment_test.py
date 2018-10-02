@@ -20,8 +20,8 @@ from tensorboardX import SummaryWriter
 
 parser = argparse.ArgumentParser(description='Sequence Modeling - Twitter sentiment prediction repro')
 
-parser.add_argument('--batch_size', type=int, default=32, metavar='N',
-                    help='batch size (default: 32)')
+parser.add_argument('--batch_size', type=int, default=128, metavar='N',
+                    help='batch size (default: 128)')
 parser.add_argument('--cuda', action='store_true', default=False,
                     help='use CUDA (default: False)')
 parser.add_argument('--dropout', type=float, default=0.2,
@@ -96,6 +96,7 @@ model = DCNN(embedding_size=embedding_size,
              padding_idx=corpus.get_padding_idx())
 
 if args.cuda:
+    print("Send model to device")
     model.cuda()
 
 # May use adaptive softmax to speed up training
@@ -128,7 +129,6 @@ def evaluate():
 def train():
     # Turn on training mode which enables dropout.
     global writer
-    global write_graph
     
     model.train()
     total_loss = 0
@@ -142,15 +142,9 @@ def train():
         if args.cuda:
             x.cuda()
             y.cuda()
+            print("sent x, y to device")
         
         optimizer.zero_grad()
-        if write_graph:
-            try:
-                writer.add_graph(model, x)
-            except KeyError as e:
-                print("Bizarro failure in building a visual of the graph with onnx.")
-            write_graph = False
-
         output = model(x)
         loss = criterion(output, y)
         loss.backward()
@@ -178,7 +172,6 @@ if __name__ == "__main__":
     best_vloss = 1e8
 
     # for Tensorbard logging
-    write_graph = True # flag flipped once first batch processed
     writer = SummaryWriter('./logs')
     
     # At any point you can hit Ctrl + C to break out of training early.
