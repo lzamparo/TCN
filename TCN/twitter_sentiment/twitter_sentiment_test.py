@@ -22,8 +22,8 @@ parser = argparse.ArgumentParser(description='Sequence Modeling - Twitter sentim
 
 parser.add_argument('--batch_size', type=int, default=32, metavar='N',
                     help='batch size (default: 32)')
-parser.add_argument('--cuda', action='store_false', default=False,
-                    help='use CUDA (default: True)')
+parser.add_argument('--cuda', action='store_true', default=False,
+                    help='use CUDA (default: False)')
 parser.add_argument('--dropout', type=float, default=0.2,
                     help='dropout applied to top-most fully connected layer (default: 0.2)')
 parser.add_argument('--emb_dropout', type=float, default=0.0,
