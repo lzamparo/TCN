@@ -260,11 +260,11 @@ class PaddingTransformer(object):
         self.token = token
         
     def __call__(self, features):
-        rows, cols = features.shape
+        cols = features.shape[0]
         to_pad = self.length - cols
-        padded_features = np.zeros((rows, self.length))
-        padded_features[:,0:cols] = features[:]
-        padded_features[:,cols:] = self.token
+        padded_features = np.zeros((self.length,))
+        padded_features[0:cols] = features[:]
+        padded_features[cols:] = self.token
         
         return padded_features
     
