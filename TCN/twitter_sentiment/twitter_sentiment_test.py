@@ -111,6 +111,12 @@ def evaluate():
     
     for batch_idx, (x, y) in enumerate(valid_loader):
         
+        x = x.long()
+        y = y.squeeze()
+        
+        if args.cuda:
+            x.cuda()
+            y.cuda()
         output = model(x)
         loss = criterion(output, y)
 
@@ -132,6 +138,10 @@ def train():
         
         x = x.long()
         y = y.squeeze()
+        
+        if args.cuda:
+            x.cuda()
+            y.cuda()
         
         optimizer.zero_grad()
         if write_graph:
