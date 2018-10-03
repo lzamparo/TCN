@@ -10,13 +10,13 @@ import yaml
 
 from torch.autograd import Variable
 from torch.utils.data import DataLoader
+from torch.optim.lr_scheduler import ReduceLROnPlateau
+from random import randint
+from tensorboardX import SummaryWriter
+
 from utils import *
 from model import DCNN
 
-
-from random import randint
-
-from tensorboardX import SummaryWriter
 
 parser = argparse.ArgumentParser(description='Sequence Modeling - Twitter sentiment prediction repro')
 
@@ -48,6 +48,8 @@ parser.add_argument('--optim', type=str, default='adagrad',
                     help='optimizer type (default: Adagrad)')
 parser.add_argument('--corpus', action='store_true',
                     help='force re-make the corpus (default: False)')
+parser.add_argument('--load', action='store_true',
+                    help='load the last savepoint from the model (default: False)')
 args = parser.parse_args()
 
 # Set the random seed manually for reproducibility.
@@ -88,14 +90,19 @@ valid_loader = DataLoader(valid_data,
                           shuffle=True,
                           pin_memory=True)
 
-model = DCNN(embedding_size=embedding_size,
-             vocab_size=n_words,
-             num_maps=num_maps, 
-             kernel_sizes=kernel_sizes, 
-             k_top=k_top,
-             output_size=output_size,
-             dropout=dropout,
-             padding_idx=corpus.get_padding_idx())
+
+if os.path.exists("./model.pt") and args.load:
+    with open("model.pt", 'rb') as f:
+        model = torch.load(f)
+else:
+    model = DCNN(embedding_size=embedding_size,
+                 vocab_size=n_words,
+                 num_maps=num_maps, 
+                 kernel_sizes=kernel_sizes, 
+                 k_top=k_top,
+                 output_size=output_size,
+                 dropout=dropout,
+                 padding_idx=corpus.get_padding_idx())
 
 if args.cuda:
     print("Send model to device")
@@ -106,7 +113,7 @@ criterion = nn.CrossEntropyLoss()
 optim_dict = {'adagrad': torch.optim.Adagrad, 'sgd': torch.optim.SGD, 'adam': torch.optim.Adam}
 lr = args.lr
 optimizer = optim_dict[args.optim](model.parameters(), lr=lr)
-
+scheduler = ReduceLROnPlateau(optimizer, 'min', patience=2)
 
 def evaluate():
     model.eval()
@@ -200,10 +207,7 @@ if __name__ == "__main__":
                 best_vloss = val_loss
 
             # Anneal the learning rate if the validation loss plateaus
-            if epoch > 5 and val_loss >= max(all_vloss[-5:]):
-                lr = lr / 2.
-                for param_group in optimizer.param_groups:
-                    param_group['lr'] = lr
+            scheduler.step(val_loss)
             all_vloss.append(val_loss)
 
     except KeyboardInterrupt:
