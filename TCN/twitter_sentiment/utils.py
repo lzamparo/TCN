@@ -12,6 +12,9 @@ from torch.utils.data import Dataset
 from torch.autograd import Variable
 from bs4 import BeautifulSoup
 from nltk.tokenize import WordPunctTokenizer
+from nltk.corpus import stopwords
+from nltk import FreqDist
+
 
 def data_generator(args):
     if os.path.exists(args.data + "/corpus") and not args.corpus:
@@ -43,6 +46,7 @@ class TwitterCorpus(object):
         self.dictionary.add_word("<<<padding>>>")
         self.padding_value = self.dictionary.word2idx["<<<padding>>>"]
         
+        self.fdist = FreqDist()
         self.file_prepared = False
         self.username_re = re.compile("\@[\w]+")
         self.url_re = re.compile("http[s]?://[\w|\.|\?|\/]+")
@@ -93,7 +97,8 @@ class TwitterCorpus(object):
         data_split \in ['training','testing'] """
         
         outpath = path.replace(".csv",".prepared.csv")
-        tokens, max_len, num_tweets = self._preprocess_and_build_dictionary(path, outpath)
+        self._make_freqdist(path)
+        tokens, max_len, num_tweets = self._preprocess_and_build_dictionary(path, outpath, fdist)
         self._pack_to_h5(outpath, data_split, tokens, max_len, num_tweets)
     
     def _process_tweet(self, tweet):
@@ -121,22 +126,23 @@ class TwitterCorpus(object):
         
         return tweet
     
-    def _detect_charset(self, path):
-        """ Use chardet to parse the file in path, 
-        and try to best guess the charset.  Clearly not 
-        ascii or utf-8. """
+    def _make_freqdist(self, path):
+        """ Read all the tweets, calculate the frequencies of 
+        the words appearing in processed tweets """
         
-        from chardet.universaldetector import UniversalDetector
-        detector = UniversalDetector()
+        #fdist1 |= fdist2
+        tok = WordPunctTokenizer()
         
         with open(path, 'r', encoding='utf-8', errors='replace') as f:
             tweet_reader = csv.reader(f, delimiter=',', quotechar='"')
             for i,parts in enumerate(tweet_reader):
-                tweet = parts[-1]            
-                detector.feed(tweet.encode('utf-8',errors='replace'))
-                if detector.done: break
-        detector.close()
-        return detector.result    
+                tweet = parts[-1]   
+                clean_tweet = self._process_tweet(tweet)
+                lc_clean_tweet = clean_tweet.lower()
+                words = [w for w in tok.tokenize(lc_clean_tweet) if len(w) > 1 and w not in stopwords.words('english')]                
+                tweet_fdist = FreqDist(words)
+                self.fdist |= tweet_fdist
+                   
     
     def _preprocess_and_build_dictionary(self, inpath, outpath, depunct=True):
         """ Preprocess the Twitter Sentiment data set in `inpath`,
@@ -164,7 +170,7 @@ class TwitterCorpus(object):
                 tweet = parts[-1]
                 clean_tweet = self._process_tweet(tweet)
                 lc_clean_tweet = clean_tweet.lower()
-                words = [w for w in tok.tokenize(lc_clean_tweet) if len(w) > 1]
+                words = [w for w in tok.tokenize(lc_clean_tweet) if len(w) > 1 and w not in stopwords.words('english')]
                 max_len = len(words) if len(words) > max_len else max_len
                 
                 for word in words:

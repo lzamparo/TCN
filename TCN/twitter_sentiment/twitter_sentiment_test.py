@@ -42,6 +42,8 @@ parser.add_argument('--log-interval', type=int, default=100, metavar='N',
                     help='report interval (default: 100)')
 parser.add_argument('--lr', type=float, default=0.1,
                     help='initial learning rate (default: 4)')
+parser.add_argument('--wd', type=float, default=0.1,
+                    help='regularization value for all parameters')
 parser.add_argument('--seed', type=int, default=1111,
                     help='random seed (default: 1111)')
 parser.add_argument('--optim', type=str, default='adagrad',
@@ -50,6 +52,8 @@ parser.add_argument('--corpus', action='store_true',
                     help='force re-make the corpus (default: False)')
 parser.add_argument('--load', action='store_true',
                     help='load the last savepoint from the model (default: False)')
+parser.add_argument('--evalonly', action='store_true',
+                    help='eval only, no training. Must be used in conjunction with --load (default: False)')
 args = parser.parse_args()
 
 # Set the random seed manually for reproducibility.
@@ -93,7 +97,7 @@ valid_loader = DataLoader(valid_data,
 
 if os.path.exists("./model.pt") and args.load:
     with open("model.pt", 'rb') as f:
-        model = torch.load(f)
+        model = torch.load(f, map_location=lambda storage, loc: storage)
 else:
     model = DCNN(embedding_size=embedding_size,
                  vocab_size=n_words,
@@ -112,8 +116,30 @@ if args.cuda:
 criterion = nn.CrossEntropyLoss()
 optim_dict = {'adagrad': torch.optim.Adagrad, 'sgd': torch.optim.SGD, 'adam': torch.optim.Adam}
 lr = args.lr
-optimizer = optim_dict[args.optim](model.parameters(), lr=lr)
+optimizer = optim_dict[args.optim](model.parameters(), lr=lr, weight_decay=args.wd)
 scheduler = ReduceLROnPlateau(optimizer, 'min', patience=2)
+
+def evaluate_count():
+    model.eval()
+    total_errors = 0
+    
+    for batch_idx, (x, y) in enumerate(valid_loader):
+        
+        x = x.long()
+        y = y.squeeze()
+        
+        if args.cuda:
+            x = x.cuda()
+            y = y.cuda()
+        output = model(x)
+        
+        # take positional max of output
+        value, max_index = output.max(dim=1, keepdim=True)
+        diffs = y - max_index.squeeze()
+        errors = diffs != 0
+        total_errors += errors.sum()
+        
+    return total_errors.item()
 
 def evaluate():
     model.eval()
@@ -182,6 +208,12 @@ if __name__ == "__main__":
 
     # for Tensorbard logging
     writer = SummaryWriter('./logs')
+    
+    if args.evalonly and args.load:
+        print("Evaluating absolute number of erros for the model ...")
+        errors = evaluate_count()
+        print("Total test set errors: ", errors)
+        sys.exit(1)
     
     # At any point you can hit Ctrl + C to break out of training early.
     try:
