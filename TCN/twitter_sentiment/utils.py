@@ -11,9 +11,8 @@ import numpy as np
 from torch.utils.data import Dataset
 from torch.autograd import Variable
 from bs4 import BeautifulSoup
-from nltk.tokenize import WordPunctTokenizer
 from nltk.corpus import stopwords
-from nltk import FreqDist
+from nltk.probability import FreqDist
 
 
 def data_generator(args):
@@ -45,6 +44,7 @@ class TwitterCorpus(object):
         self.dictionary = Dictionary()
         self.dictionary.add_word("<<<padding>>>")
         self.padding_value = self.dictionary.word2idx["<<<padding>>>"]
+        self.max_vocab_size = args.max_vocab_size
         
         self.fdist = FreqDist()
         self.file_prepared = False
@@ -98,7 +98,7 @@ class TwitterCorpus(object):
         
         outpath = path.replace(".csv",".prepared.csv")
         self._make_freqdist(path)
-        tokens, max_len, num_tweets = self._preprocess_and_build_dictionary(path, outpath, fdist)
+        tokens, max_len, num_tweets = self._preprocess_and_build_dictionary(path, outpath)
         self._pack_to_h5(outpath, data_split, tokens, max_len, num_tweets)
     
     def _process_tweet(self, tweet):
@@ -106,6 +106,7 @@ class TwitterCorpus(object):
    
         # unique tokens with this, no depunct: 755992
         # removing single char tokens, expanding contractions: 277990
+        # target vocab should be 76643, size reported in Kalchbrenner & Gref & Blunsom
         
         tweet = tweet.strip()
         tweet = BeautifulSoup(tweet, 'lxml').get_text()
@@ -130,19 +131,19 @@ class TwitterCorpus(object):
         """ Read all the tweets, calculate the frequencies of 
         the words appearing in processed tweets """
         
-        #fdist1 |= fdist2
-        tok = WordPunctTokenizer()
-        
+        translator = str.maketrans('', '', string.punctuation)
+        print("Counting words in training...")
         with open(path, 'r', encoding='utf-8', errors='replace') as f:
             tweet_reader = csv.reader(f, delimiter=',', quotechar='"')
             for i,parts in enumerate(tweet_reader):
                 tweet = parts[-1]   
                 clean_tweet = self._process_tweet(tweet)
                 lc_clean_tweet = clean_tweet.lower()
-                words = [w for w in tok.tokenize(lc_clean_tweet) if len(w) > 1 and w not in stopwords.words('english')]                
-                tweet_fdist = FreqDist(words)
-                self.fdist |= tweet_fdist
-                   
+                words = [w for w in lc_clean_tweet.translate(translator).split() if len(w) > 1]                
+                self.fdist.update(words)
+                if i % 10000 == 0:
+                    print("Processed first ", i, "tweets")
+               
     
     def _preprocess_and_build_dictionary(self, inpath, outpath, depunct=True):
         """ Preprocess the Twitter Sentiment data set in `inpath`,
@@ -157,12 +158,13 @@ class TwitterCorpus(object):
         
         assert os.path.exists(inpath)
         if depunct:
-            tok = WordPunctTokenizer()
+            translator = str.maketrans('', '', string.punctuation)
             
         with open(inpath, 'r', encoding='utf-8-sig', errors='replace') as in_f, open(outpath,'w', encoding='utf-8') as out_f:
             tweet_reader = csv.reader(in_f, delimiter=',', quotechar='"')
             tweet_writer = csv.writer(out_f, delimiter=',', quotechar='"')
             max_len = 0
+            vocab_words = frozenset([w for w,c in self.fdist.most_common(self.max_vocab_size)])
             
             for i, parts in enumerate(tweet_reader):
                 if (i % 10000) == 0:
@@ -170,7 +172,7 @@ class TwitterCorpus(object):
                 tweet = parts[-1]
                 clean_tweet = self._process_tweet(tweet)
                 lc_clean_tweet = clean_tweet.lower()
-                words = [w for w in tok.tokenize(lc_clean_tweet) if len(w) > 1 and w not in stopwords.words('english')]
+                words = [w for w in lc_clean_tweet.translate(translator).split() if len(w) > 1 and w in vocab_words]
                 max_len = len(words) if len(words) > max_len else max_len
                 
                 for word in words:

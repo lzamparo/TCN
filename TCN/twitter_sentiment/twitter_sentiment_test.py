@@ -26,6 +26,8 @@ parser.add_argument('--cuda', action='store_true', default=False,
                     help='use CUDA (default: False)')
 parser.add_argument('--dropout', type=float, default=0.2,
                     help='dropout applied to top-most fully connected layer (default: 0.2)')
+parser.add_argument('--max_vocab_size', type=int, default=76643,
+                    help='limit the vocabulary to <size> most common words (default: 76643)')
 parser.add_argument('--emb_dropout', type=float, default=0.0,
                     help='dropout applied to the embedded layer (default: 0.0)')
 parser.add_argument('--clip', type=float, default=-1.0,
