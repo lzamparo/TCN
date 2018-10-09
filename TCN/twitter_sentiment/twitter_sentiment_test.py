@@ -20,7 +20,7 @@ from model import DCNN
 
 parser = argparse.ArgumentParser(description='Sequence Modeling - Twitter sentiment prediction repro')
 
-parser.add_argument('--batch_size', type=int, default=128, metavar='N',
+parser.add_argument('--batch_size', type=int, default=64, metavar='N',
                     help='batch size (default: 128)')
 parser.add_argument('--cuda', action='store_true', default=False,
                     help='use CUDA (default: False)')
@@ -43,7 +43,7 @@ parser.add_argument('--testing', type=str, default='./data/testdata.manual.2009.
 parser.add_argument('--log-interval', type=int, default=100, metavar='N',
                     help='report interval (default: 100)')
 parser.add_argument('--lr', type=float, default=0.1,
-                    help='initial learning rate (default: 4)')
+                    help='initial learning rate (default: 0.1)')
 parser.add_argument('--wd', type=float, default=0.1,
                     help='regularization value for all parameters')
 parser.add_argument('--seed', type=int, default=1111,
