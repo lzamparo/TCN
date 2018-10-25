@@ -21,11 +21,11 @@ from model import DCNN
 parser = argparse.ArgumentParser(description='Sequence Modeling - Twitter sentiment prediction repro')
 
 parser.add_argument('--batch_size', type=int, default=64, metavar='N',
-                    help='batch size (default: 128)')
+                    help='batch size (default: 64)')
 parser.add_argument('--cuda', action='store_true', default=False,
                     help='use CUDA (default: False)')
-parser.add_argument('--dropout', type=float, default=0.2,
-                    help='dropout applied to top-most fully connected layer (default: 0.2)')
+parser.add_argument('--dropout', type=float, default=0.5,
+                    help='dropout applied to top-most fully connected layer (default: 0.5)')
 parser.add_argument('--max_vocab_size', type=int, default=76643,
                     help='limit the vocabulary to <size> most common words (default: 76643)')
 parser.add_argument('--emb_dropout', type=float, default=0.0,
